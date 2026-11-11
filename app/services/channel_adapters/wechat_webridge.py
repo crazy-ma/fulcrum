@@ -112,6 +112,12 @@ class WechatWeBridgeAdapter(BaseChannelAdapter):
             "group": {key: body.get(key) for key in ("room_id", "member_id", "member_ids", "group_name", "operation") if body.get(key) is not None},
             "moment": {key: body.get(key) for key in ("sns_id", "media_id", "author_id", "operation_id") if body.get(key) is not None},
         }
+        if message_type == "pat":
+            # 拍一拍:把谁拍了谁整理成统一结构,触发规则只读 details.pat,不关心微桥的字段命名
+            details["pat"] = _build_pat_info(body)
+        if _is_from_self(channel, str(body.get("sender_id") or body.get("from") or "")):
+            # 本账号自己发出的消息(手机上亲自发的、机器人回复后回流的都算):标记出来,AI 不把它当用户输入
+            details["from_self"] = True
         member_change = _build_member_change(event_name, body)
         if member_change:
             # 结构化成员事件:插件直接读 details.member_change,消息内容写成中文,后台和日志可读。
@@ -139,6 +145,53 @@ class WechatWeBridgeAdapter(BaseChannelAdapter):
 
 
 _MEMBER_EVENT_TYPES = {"group_member_join": "join", "group_member_leave": "left", "group_member_nickname_change": "rename"}
+
+
+def _is_from_self(channel: Channel | None, sender_id: str) -> bool:
+    """事件发送者是否就是这个渠道登录的微信账号本身(以手机注册时登记的账号 ID 为准)。
+
+    微桥会把本账号发出的消息也当入站事件推回来;不识别的话,机器人自己的回复会被当成
+    用户消息再喂给 AI,AI 对着自己的话继续回复,形成自问自答的循环。
+    """
+
+    if channel is None or not sender_id.strip():
+        return False
+    from app.services.wechat_webridge.service import _runtime
+
+    bridge = _runtime(channel).get("webridge")
+    own = str(bridge.get("account_id") or "").strip() if isinstance(bridge, dict) else ""
+    return bool(own) and sender_id.strip() == own
+
+
+def _first_text(body: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """按顺序取第一个非空字段。"""
+
+    for key in keys:
+        value = str(body.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _build_pat_info(body: dict[str, Any]) -> dict[str, Any]:
+    """整理拍一拍事件:拍的人、被拍的人、系统文案,以及微桥明确告知时的"被拍的是不是机器人自己"。
+
+    不同微桥版本字段命名不一,这里按常见写法依次尝试;取不到的留空,
+    触发规则在无法判断被拍对象时不会触发"只回应拍机器人"的规则。
+    """
+
+    info: dict[str, Any] = {
+        "from_id": _first_text(body, ("pat_from", "from_user", "fromusername", "from_username", "sender_id")),
+        "from_name": _first_text(body, ("pat_from_name", "from_nickname", "sender_name", "nickname")),
+        "patted_id": _first_text(body, ("pat_patted", "patted_user", "pattedusername", "patted_username", "patted_id", "target_id", "to_user")),
+        "patted_name": _first_text(body, ("pat_patted_name", "patted_nickname", "target_name")),
+        "template": _first_text(body, ("pat_template", "template", "content")),
+    }
+    for key in ("patted_is_self", "is_self", "patted_self"):
+        if isinstance(body.get(key), bool):
+            info["patted_is_me"] = body[key]
+            break
+    return info
 
 
 def _build_member_change(event_name: str, body: dict[str, Any]) -> dict[str, Any] | None:
