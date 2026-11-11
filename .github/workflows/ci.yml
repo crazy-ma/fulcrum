@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m compileall -q app plugins scripts migrations
+      # 逐文件隔离运行主体功能里已验证稳定通过的测试文件(清单见 .github/ci-test-files.txt)。
+      # 业务插件的测试不在 CI 范围内;其余历史测试正在整理,修好后加入清单。
+      - name: Tests
+        env:
+          JOBS: "4"
+        run: scripts/run_tests_isolated.sh .github/ci-test-files.txt

@@ -1,0 +1,289 @@
+{% extends 'base.html' %}
+{% from '_identity.html' import identity %}
+{% from '_payment_ledger.html' import payment_ledger %}
+{# 群详情：群功能 / 插件 / 成员 / 消息 / 资料 五个标签，默认进入群功能；技术字段统一折叠到“技术信息”。 #}
+{% set base_url = '/channels/' ~ channel.id ~ '/chatrooms/' ~ detail.chatroom_id %}
+{% block hero_actions %}
+<div class="hero-action-cluster">
+  <a class="btn btn-secondary" href="/chatrooms?channel_id={{ channel.id }}">返回群管理</a>
+  {% if detail.sync_action or channel.channel_type == 'wechat_ipad' or channel.channel_type == 'workwechat' %}
+  <form method="post" action="{{ detail.sync_action or (base_url ~ '/sync') }}">
+    <button class="btn btn-secondary" type="submit">{{ detail.sync_button_label or '同步当前群' }}</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
+{% block content %}
+<section class="work-surface">
+  <div class="toolbar">
+    <div>{{ identity({'name': detail.name, 'external_id': detail.chatroom_external_id, 'avatar_url': detail.avatar_url|default(''), 'initial': (detail.name or '?')[:1], 'show_id': false}, 'lg') }}</div>
+    <div class="chip-row">
+      <span class="chip chip-outline">{{ detail.member_record_count }} 名成员</span>
+      <span class="chip {% if detail.management_status == 'enabled' %}chip-success{% else %}chip-muted{% endif %}">{{ detail.management_status_label }}</span>
+      <span class="chip chip-outline">最近同步 {{ detail.last_synced_at|bj_time if detail.last_synced_at else '-' }}</span>
+    </div>
+  </div>
+
+  <nav class="tab-bar">
+    <a href="{{ base_url }}?tab=features" class="{{ 'active' if tab == 'features' }}">群功能</a>
+    <a href="{{ base_url }}?tab=plugins" class="{{ 'active' if tab == 'plugins' }}">插件 ({{ detail.binding_summary.effective_enabled_count }}/{{ detail.binding_summary.total }})</a>
+    <a href="{{ base_url }}?tab=members" class="{{ 'active' if tab == 'members' }}">成员 ({{ detail.members|length }})</a>
+    <a href="{{ base_url }}?tab=messages" class="{{ 'active' if tab == 'messages' }}">消息</a>
+    <a href="{{ base_url }}?tab=profile" class="{{ 'active' if tab == 'profile' }}">资料</a>
+  </nav>
+
+  {% if tab == 'features' %}
+  {# 群功能:每个能力一张卡片。标题 + 总开关为主,设置分小节铺开为次;配置存在群自己的记录里。 #}
+  <div class="gf-list">
+  {# 运行模式:三选一。只采集消息 = 继续记录但不触发功能;完全关闭 = 不接收也不触发。 #}
+  <form method="post" action="{{ base_url }}/management" class="gf-card is-on" data-gf-card data-gf-key="mode" data-gf-open="1">
+    <header class="gf-head">
+      <div class="gf-head-copy" data-gf-toggle-title>
+        <h3>运行模式</h3>
+        <p>决定机器人在本群做什么。下面各项群功能，只在“正常运行”时生效。</p>
+      </div>
+      <div class="gf-head-actions">
+        <button class="gf-toggle" type="button" data-gf-toggle aria-expanded="true" aria-label="展开或收起设置" title="展开或收起设置"></button>
+      </div>
+    </header>
+    <div class="gf-collapse" data-gf-collapse>
+    <div class="gf-body">
+      <div class="gf-mode-list">
+        {% for mode in group_modes %}
+        <label class="gf-mode{% if mode.value == group_mode %} is-selected{% endif %}">
+          {# 选中即生效:脚本提交后弹出提示;失败时回到原来的选项 #}
+          <input type="radio" name="management_status" value="{{ mode.value }}" data-autosave-url="{{ base_url }}/management" data-autosave-key="management_status" data-autosave-form="{}"{% if mode.value == group_mode %} checked{% endif %} />
+          <span class="gf-mode-text"><strong>{{ mode.label }}</strong><small>{{ mode.hint }}</small></span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    </div>
+  </form>
+  {% for item in features %}
+  <form method="post" action="{{ base_url }}/features/{{ item.key }}" class="gf-card{% if item.enabled %} is-on{% endif %}" data-gf-card data-gf-key="{{ item.key }}"{% if item.has_inputs %} data-gf-save-url="{{ base_url }}/features/{{ item.key }}"{% endif %}>
+    <header class="gf-head">
+      <div class="gf-head-copy"{% if item.sections %} data-gf-toggle-title{% endif %}>
+        <h3>{{ item.name }}</h3>
+        <p>{{ item.description }}</p>
+      </div>
+      <div class="gf-head-actions">
+        <label class="gf-master" title="在本群开启或关闭">
+          <span class="gf-master-text" data-gf-state>{{ '已开启' if item.enabled else '未开启' }}</span>
+          <span class="ui-switch">
+            <input type="checkbox" name="enabled" value="true" role="switch" data-gf-master data-on-text="已开启" data-off-text="未开启" data-autosave-url="{{ base_url }}/features/{{ item.key }}/toggle" data-autosave-json='{"field":"enabled"}'{% if item.enabled %} checked{% endif %} />
+            <span class="ui-switch-track"></span>
+          </span>
+        </label>
+        {% if item.sections %}<button class="gf-toggle" type="button" data-gf-toggle aria-expanded="false" aria-label="展开或收起设置" title="展开或收起设置"></button>{% endif %}
+      </div>
+    </header>
+
+    {# 设置区:默认收起,点右侧的箭头图标展开;展开状态记在浏览器里。没有设置项的功能(只有开关)没有这一块。 #}
+    {% if item.sections %}
+    <div class="gf-collapse" data-gf-collapse hidden>
+    <div class="gf-body">
+      {% for section in item.sections %}
+      <section class="gf-section">
+        {% if section.title %}<h4>{{ section.title }}</h4>{% endif %}
+        {% if section.switches %}
+        <div class="gf-switch-list">
+          {% for field in section.switches %}
+          <label class="gf-row"{% if field.depends_on %} data-gf-depends="{{ field.depends_on }}"{% endif %}>
+            <span class="gf-row-label">{{ field.label }}</span>
+            <span class="ui-switch ui-switch-small">
+              <input type="checkbox" name="{{ field.name }}" value="true" role="switch" data-autosave-url="{{ base_url }}/features/{{ item.key }}/toggle" data-autosave-json='{"field":"{{ field.key }}"}'{% if field.value %} checked{% endif %} />
+              <span class="ui-switch-track"></span>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if section.inputs %}
+        <div class="gf-inputs">
+          {% for field in section.inputs %}
+          <label class="gf-field{% if field.kind != 'number' %} gf-field-wide{% endif %}"{% if field.depends_on %} data-gf-depends="{{ field.depends_on }}"{% endif %}>
+            <span class="gf-field-label">{{ field.label }}</span>
+            {% if field.kind == 'number' %}
+            <input type="number" name="{{ field.name }}" value="{{ field.value }}"{% if field.minimum is not none %} min="{{ field.minimum }}"{% endif %}{% if field.maximum is not none %} max="{{ field.maximum }}"{% endif %} />
+            {% elif field.kind == 'secret' %}
+            <input type="password" name="{{ field.name }}" autocomplete="new-password" placeholder="{{ '已配置，留空则保持不变' if field.configured else '未配置，沿用租户统一设置' }}" />
+            {% elif field.kind == 'textarea' %}
+            <textarea name="{{ field.name }}" rows="4" maxlength="2000">{{ field.value }}</textarea>
+            {% else %}
+            <input type="text" name="{{ field.name }}" value="{{ field.value }}" />
+            {% endif %}
+            {% if field.hint %}<small>{{ field.hint }}</small>{% endif %}
+          </label>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </div>
+    {# 只有设置区里有文本/数字/密钥输入时才需要保存按钮;开关点一下就已保存。 #}
+    {% if item.has_inputs %}
+    <footer class="gf-foot">
+      <button class="btn" type="submit">保存</button>
+    </footer>
+    {% endif %}
+    </div>
+    {% endif %}
+    {# 自动抢红包、自动收款:本群收到并处理过的款项明细与统计(折叠,默认收起) #}
+    {% if ledgers.get(item.key) %}{{ payment_ledger(ledgers[item.key]) }}{% endif %}
+  </form>
+  {% endfor %}
+  </div>
+
+  {% elif tab == 'plugins' %}
+  {% if detail.bindings %}
+  {% for item in detail.bindings %}
+  <div class="plugin-row" data-scope-row>
+    <div>
+      <h3>{{ item.plugin_name }}
+        <span class="chip chip-success" data-scope-custom-chip{% if item.group_scope_status == 'inherited' %} hidden{% endif %}>本群已自定义</span>
+      </h3>
+      {% if item.plugin_description %}<p class="muted-text" style="margin:2px 0 0;">{{ item.plugin_description }}</p>{% endif %}
+    </div>
+    <div class="plugin-row-actions row-controls">
+      {# 开关:点击即保存(启用/停用);“恢复默认”回到继承 bot 级状态。 #}
+      <span class="ui-switch" title="在本群启用或停用这个插件">
+        <input type="checkbox" role="switch" aria-label="在本群启用 {{ item.plugin_name }}" data-autosave-url="{{ base_url }}/scopes/{{ item.binding_id }}/mode" data-autosave-key="mode" data-autosave-on="enabled" data-autosave-off="disabled" data-autosave-form="{}"{% if item.group_scope_enabled %} checked{% endif %} />
+        <span class="ui-switch-track"></span>
+      </span>
+      <form method="post" action="{{ base_url }}/scopes/{{ item.binding_id }}/mode" data-scope-reset-form{% if item.group_scope_status == 'inherited' %} hidden{% endif %}>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="mode" value="inherited" />
+        <button class="btn btn-secondary btn-small" type="submit">恢复默认</button>
+      </form>
+    </div>
+    <details class="disclosure">
+      <summary class="muted-text">高级配置与技术信息</summary>
+      <form method="post" action="{{ base_url }}/scopes/{{ item.binding_id }}/config" class="chatroom-scope-config-form top-gap">
+        <span class="chatroom-scope-label">本群配置覆盖（JSON，仅保存与默认不同的部分）</span>
+        <textarea name="config_override_json" rows="8" class="chatroom-json-editor-textarea" spellcheck="false" data-json-editor>{{ item.group_scope_effective_config_json }}</textarea>
+        <div class="chatroom-scope-editor-actions" style="margin-top:8px;">
+          <button class="btn btn-secondary btn-small" type="button" data-json-format>格式化</button>
+          <button class="btn btn-secondary btn-small" type="button" data-json-clear>清空</button>
+          <button class="btn" type="submit">保存覆盖</button>
+        </div>
+      </form>
+      <p class="muted-text">
+        插件 <code>{{ item.plugin_code }}</code> · Binding #{{ item.binding_id }} · runtime={{ item.runtime_status }} ·
+        mode={{ item.group_scope_mode }} · effect={{ item.group_scope_effect }} · scope={{ item.group_scope_action_scope }} ·
+        最近执行 {{ item.last_execution_status }} {{ item.last_execution_at|bj_time if item.last_execution_at else '' }}
+      </p>
+    </details>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="muted-text">当前机器人还没有绑定插件，请先到“插件”中为机器人添加插件。</p>
+  {% endif %}
+
+  {% elif tab == 'members' %}
+  {% if detail.members %}
+  {% if detail.health %}
+  {# 群健康度:分数 + 活跃/沉默概览,口径与 abot 一致。 #}
+  <div class="chip-row" style="margin-bottom:10px;">
+    <span class="chip {% if detail.health.score >= 80 %}chip-success{% else %}chip-outline{% endif %}">健康度 {{ detail.health.score }} · {{ detail.health.level }}</span>
+    <span class="chip chip-outline">7 天活跃 {{ detail.health.active_7d }}</span>
+    <span class="chip chip-outline">30 天活跃 {{ detail.health.active_30d }}</span>
+    <span class="chip chip-outline">30 天沉默 {{ detail.health.silent }}</span>
+    <span class="chip chip-outline">30 天消息 {{ detail.health.messages_30d }}</span>
+    <span class="chip chip-outline">30 天插件调用 {{ detail.health.plugin_calls_30d }}</span>
+  </div>
+  {% endif %}
+  <div class="chip-row" style="margin-bottom:10px;">
+    {% for role, count in detail.role_counts.items() %}<span class="chip chip-outline">{{ role }} {{ count }}</span>{% endfor %}
+  </div>
+  <div class="table-scroll">
+  <table class="table">
+    <thead><tr><th>成员</th><th>群内昵称</th><th>角色</th>{% if detail.show_points %}<th class="col-compact">积分</th>{% endif %}<th class="col-time">最后发言</th></tr></thead>
+    <tbody>
+      {% for item in detail.members %}
+      <tr>
+        <td>{{ identity({'name': item.nickname, 'external_id': item.member_external_id, 'avatar_url': item.avatar_url, 'initial': (item.nickname or '?')[:1], 'show_id': item.nickname != item.member_external_id}, 'lg') }}</td>
+        <td>{{ item.display_name }}</td>
+        <td>{{ item.role_label }}</td>
+        {% if detail.show_points %}<td class="col-compact">{{ item.points }} <a class="btn btn-small btn-secondary" href="/points?group_id={{ detail.chatroom_external_id|urlencode }}&q={{ (item.nickname or item.member_external_id)|urlencode }}">调整</a></td>{% endif %}
+        <td class="col-time">{{ item.last_active_at|bj_time if item.last_active_at else '-' }}{% if item.last_active_label %}<div class="muted-text">{{ item.last_active_label }}</div>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted-text">{{ detail.member_section_hint or '还没有成员信息，请点击右上角同步。' }}</p>
+  {% endif %}
+
+  {% elif tab == 'messages' %}
+  {% set flow = detail.message_flow if detail.message_flow is defined else none %}
+  {% if flow and flow['items'] %}
+  {# 只展示最近 30 条，最新的在底部；完整检索走“消息”主入口。 #}
+  <div class="table-scroll">
+  <table class="table">
+    <thead><tr><th class="col-time">时间</th><th>发送者</th><th>内容</th></tr></thead>
+    <tbody>
+      {% for item in (flow['items'][:30])|reverse %}
+      <tr>
+        <td class="col-time">{{ item.created_at|bj_time if item.created_at else '-' }}</td>
+        <td>{{ identity(item.identity) }}</td>
+        <td><div class="message-preview">{{ (item.content or '')[:200] }}{{ '...' if (item.content or '')|length > 200 }}</div></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted-text">本群还没有消息记录。</p>
+  {% endif %}
+
+  {% else %}
+  <table class="table table-tight">
+    <tbody>
+      <tr><th>群名</th><td>{{ detail.name }}</td></tr>
+      <tr><th>备注</th><td>{{ detail.remark }}</td></tr>
+      <tr><th>本地状态</th><td>{{ detail.status_label }}</td></tr>
+    </tbody>
+  </table>
+  <details class="disclosure" style="margin-top:16px;">
+    <summary class="muted-text">技术信息</summary>
+    <p class="muted-text">群 #{{ detail.chatroom_id }} · 外部 ID <code>{{ detail.chatroom_external_id }}</code> · 群主 <code>{{ detail.owner_external_id }}</code> · 来源 {{ detail.observed_source }} · 同步深度 {{ detail.sync_depth_label }}</p>
+  </details>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/group-features.js" defer></script>
+<script>
+  (() => {
+    // 群内插件开关保存成功后:启用/停用都算"本群已自定义",显示标签和"恢复默认"按钮。
+    document.addEventListener("autosave:done", (event) => {
+      const row = event.target.closest("[data-scope-row]");
+      if (!row) return;
+      const custom = Boolean(event.detail.response.custom);
+      const chip = row.querySelector("[data-scope-custom-chip]");
+      const reset = row.querySelector("[data-scope-reset-form]");
+      if (chip) chip.hidden = !custom;
+      if (reset) reset.hidden = !custom;
+    });
+  })();
+</script>
+<script>
+  (() => {
+    document.querySelectorAll(".chatroom-scope-config-form").forEach((form) => {
+      const textarea = form.querySelector("[data-json-editor]");
+      const formatButton = form.querySelector("[data-json-format]");
+      const clearButton = form.querySelector("[data-json-clear]");
+      if (!textarea) return;
+      if (formatButton) formatButton.addEventListener("click", () => {
+        const raw = textarea.value.trim();
+        if (!raw) return;
+        try { textarea.value = JSON.stringify(JSON.parse(raw), null, 2); }
+        catch (error) { window.appDialog.alert({ title: "JSON 格式化失败", message: error.message, tone: "danger" }); }
+      });
+      if (clearButton) clearButton.addEventListener("click", () => { textarea.value = ""; textarea.focus(); });
+    });
+  })();
+</script>
+{% endblock %}

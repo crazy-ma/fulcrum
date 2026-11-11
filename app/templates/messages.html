@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% from '_message_rows.html' import message_rows %}
+{% block hero_actions %}
+{% if selected_total is not none %}<div class="hero-action-cluster"><span class="chip chip-outline">消息 {{ selected_total }}</span></div>{% endif %}
+{% endblock %}
+{% block content %}
+{% if conversation_summaries %}
+{# 整页撑满窗口高度:左侧会话列表、右侧对话各自在内部滚动(高度由 messages.js 按窗口计算,样式里有兜底值)。 #}
+<section class="msg-center" id="msg-center" data-conversation-id="{{ selected_conversation_id or '' }}" data-has-more="{{ 1 if has_more_messages else 0 }}">
+  <aside class="wechat-conversation-list" aria-label="会话列表">
+    {% for item in conversation_summaries %}
+    <a class="wechat-conversation-item{% if item.conversation.id == selected_conversation_id %} active{% endif %}" href="/messages?conversation_id={{ item.conversation.id }}{% if channel_id %}&channel_id={{ channel_id }}{% endif %}">
+      <span class="wechat-avatar">{% if item.identity.avatar_url %}<img src="{{ item.identity.avatar_url }}" alt="" referrerpolicy="no-referrer" />{% else %}{{ item.initial }}{% endif %}</span>
+      <span class="wechat-conversation-copy">
+        <span class="wechat-conversation-head">
+          <strong class="wechat-conversation-name">{{ item.display_name }}</strong>
+          <time class="wechat-conversation-time">{{ item.latest.created_at|bj_time if item.latest and item.latest.created_at else '-' }}</time>
+        </span>
+        <span class="wechat-conversation-preview">{{ item.latest.content|message_display(item.latest.message_type) if item.latest else '暂无消息' }}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </aside>
+
+  <section class="wechat-thread">
+    {% set selected = namespace(item=None) %}
+    {% for item in conversation_summaries %}{% if item.conversation.id == selected_conversation_id %}{% set selected.item = item %}{% endif %}{% endfor %}
+    {% if selected.item %}
+    <header class="wechat-thread-head">
+      <h2>{{ selected.item.display_name }}</h2>
+      <p class="muted-text">{{ '群聊' if selected.item.conversation.chat_type == 'group' else '私聊' }}{% if selected_chatroom %} · <a href="/channels/{{ selected_chatroom.channel_id }}/chatrooms/{{ selected_chatroom.id }}">群设置</a>{% endif %}</p>
+    </header>
+    {% endif %}
+
+    <div class="wechat-thread-body" id="wechat-thread-body">
+      {% if not selected_conversation_id %}
+      <div class="wechat-empty">从左侧选择一个联系人或群聊</div>
+      {% else %}
+      <div class="wechat-load-hint" id="wechat-load-hint" hidden></div>
+      {% if messages %}{{ message_rows(messages, message_identities, message_views) }}{% else %}<div class="wechat-empty">当前会话暂无消息</div>{% endif %}
+      {% endif %}
+    </div>
+
+    {% if selected.item %}
+    {# 发送框:由 messages.js 用 fetch 提交,不刷新页面;Enter 发送,Shift+Enter 换行。 #}
+    <form class="wechat-composer" id="wechat-composer" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="conversation_id" value="{{ selected_conversation_id }}" />
+      <div class="wechat-composer-box">
+        <textarea name="content" rows="1" maxlength="2000" placeholder="输入消息…" aria-label="消息内容"></textarea>
+        <button class="wechat-send" type="submit" disabled>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
+          <span>发送</span>
+        </button>
+      </div>
+      <p class="wechat-composer-hint" id="wechat-composer-hint" role="status">Enter 发送，Shift + Enter 换行</p>
+    </form>
+    {% endif %}
+  </section>
+</section>
+<script src="/static/js/messages.js" defer></script>
+<script src="/static/js/message-media.js" defer></script>
+{% else %}
+<div class="work-surface"><div class="wechat-empty">暂无会话消息</div></div>
+{% endif %}
+{% endblock %}

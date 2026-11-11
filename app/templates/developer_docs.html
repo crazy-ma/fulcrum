@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{# 左侧为文档目录（二级/三级标题），右侧为完整文档；点击目录跳转到对应锚点。 #}
+<section class="developer-docs-layout">
+  <nav class="developer-docs-aside developer-docs-toc" aria-label="文档目录">
+    {{ document_toc|safe }}
+  </nav>
+  <article class="developer-docs-content markdown-body">
+    {{ document_html|safe }}
+  </article>
+</section>
+{% endblock %}
