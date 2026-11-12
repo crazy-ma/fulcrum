@@ -285,6 +285,7 @@ def persist_directory_result(
                     db.add(member)
                 member.nickname = str(item.get("nick_name") or item.get("nickname") or member.nickname or item.get("display_name") or external_id)[:255]
                 member_state = as_object(member_directory.extra_object(member.extra_json).get(member_directory.STATE_KEY))
+                member_state["observed_only"] = False
                 if isinstance(item.get("room_nick_name"), str):
                     member_state["room_nickname"] = item["room_nick_name"][:255]
                 room_nickname = member_state.get("room_nickname")
