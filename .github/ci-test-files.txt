@@ -120,3 +120,8 @@ tests/test_ai_self_message.py
 tests/test_plugin_member_names.py
 tests/test_plugin_idiom_guess.py
 tests/test_plugin_schedule_manifest.py
+tests/test_auth_security_logging.py
+tests/test_image_captcha.py
+tests/test_guess_image_bank.py
+tests/test_plugin_guess_image.py
+tests/test_guess_image_pages.py

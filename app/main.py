@@ -199,7 +199,7 @@ from app.services.workwechat_contacts import (
     sync_workwechat_contacts,
     upsert_workwechat_contact,
 )
-from app.web import billing_router, developer_docs_router, group_triggers_router, open_api_apps_router, platform_admin_router, platform_auth_router, platform_billing_router, platform_operations_router, platform_plugins_router, provider_nodes_router, public_site_router, tenant_admin_router, tenant_auth_router
+from app.web import billing_router, developer_docs_router, group_triggers_router, guess_image_router, open_api_apps_router, platform_admin_router, platform_auth_router, platform_billing_router, platform_operations_router, platform_plugins_router, provider_nodes_router, public_site_router, tenant_admin_router, tenant_auth_router
 from app.web.auth_common import (
     PLATFORM_LOGIN_PATH,
     PLATFORM_SESSION_COOKIE,
@@ -239,6 +239,7 @@ app.include_router(provider_router)
 app.include_router(public_site_router)
 app.include_router(developer_docs_router)
 app.include_router(group_triggers_router)
+app.include_router(guess_image_router)
 app.include_router(tenant_auth_router)
 app.include_router(platform_auth_router)
 app.include_router(billing_router)
@@ -1284,6 +1285,7 @@ async def auth_middleware(request: Request, call_next):
         "/setup/completed",
         TENANT_LOGIN_PATH,
         PLATFORM_LOGIN_PATH,
+        "/auth/captcha",
     }
     # 认证中间件只保护应用真实注册的页面和接口。完全未注册的路径直接交给
     # FastAPI 生成原生 404；仅方法不匹配的路由仍继续处理，以保留标准 405 响应。
