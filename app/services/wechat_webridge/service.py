@@ -167,6 +167,16 @@ def _directory_id(item: dict[str, Any], *keys: str) -> str:
     return next((str(item.get(key) or "").strip() for key in keys if str(item.get(key) or "").strip()), "")
 
 
+def _merge_directory_extra(existing: str | None, **updates: Any) -> str:
+    """目录同步只更新协议资料,保留群功能、媒体开关及本地成员元数据。"""
+
+    try:
+        extra = as_object(json.loads(existing or "{}"))
+    except (TypeError, ValueError):
+        extra = {}
+    return json.dumps({**extra, **updates}, ensure_ascii=False, sort_keys=True)
+
+
 def persist_directory_result(db: Session, channel: Channel, command: dict[str, Any], result: dict[str, Any]) -> dict[str, int]:
     """把好友、群组和群成员同步结果写入现有联系人与群组实体。"""
 
@@ -206,7 +216,7 @@ def persist_directory_result(db: Session, channel: Channel, command: dict[str, A
                 # 同步群列表不能把手动停用的群重新打开。
                 room = Chatroom(bot_id=channel.bot_id, channel_id=channel.id, external_id=external_id, first_seen_at=now, is_active=True, management_status="enabled")
                 db.add(room)
-            # 之前被标记为已退出的群又出现在列表里:先恢复退群前的启用状态(下面会覆盖 extra_json,所以要先读)。
+            # 之前被标记为已退出的群又出现在列表里:恢复退群前的启用状态。
             from app.services.wechat_webridge import group_sync
 
             group_sync.restore_if_returned(room)
@@ -216,7 +226,7 @@ def persist_directory_result(db: Session, channel: Channel, command: dict[str, A
             room.last_seen_at = now
             room.last_synced_at = now
             room.member_count = int(item.get("member_count") or item.get("member_total") or item.get("member_num") or room.member_count or 0)
-            room.extra_json = json.dumps({"source": "wechat_webridge", "avatar_url": item.get("avatar_url") or item.get("avatar") or "", "raw": item}, ensure_ascii=False, sort_keys=True)
+            room.extra_json = _merge_directory_extra(room.extra_json, source="wechat_webridge", avatar_url=item.get("avatar_url") or item.get("avatar") or "", raw=item)
             conversation = db.scalar(select(Conversation).where(Conversation.channel_id == channel.id, Conversation.external_id == external_id))
             if conversation is not None:
                 conversation.title = room.name
@@ -242,7 +252,7 @@ def persist_directory_result(db: Session, channel: Channel, command: dict[str, A
                 # 微桥成员项自带 is_owner / is_admin，群详情的角色概览依赖 role 字段。
                 member.role = "owner" if item.get("is_owner") else ("admin" if item.get("is_admin") else "member")
                 member.last_synced_at = now
-                member.extra_json = json.dumps({"avatar_url": item.get("avatar_url") or item.get("avatar") or "", "raw": item}, ensure_ascii=False, sort_keys=True)
+                member.extra_json = _merge_directory_extra(member.extra_json, avatar_url=item.get("avatar_url") or item.get("avatar") or "", raw=item)
                 counts["members"] += 1
             # 以前的群友要保留:这次名单里已经没有的成员只标记为已退群,不删除,历史发言与积分都还在。
             # 名单为空或返回自带“被截断/还有更多”标记时不是完整名单,不做标记,避免一次异常返回误伤全员。
