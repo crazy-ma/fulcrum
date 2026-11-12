@@ -142,6 +142,13 @@ def ingest_normalized_event(
         # 旧值为空或只是 external_id 时允许被真实群名覆盖，避免后台一直显示 R:xxx。
         conversation.title = str(conversation_payload.get("title")).strip()
 
+    if channel.channel_type == "wechat_gugatool":
+        # 咕嘎助手没有群列表接口，群实体只能在收到群消息时按名册落库；
+        # 这样群管理页才能在群第一次说话后就有群和成员，而不是一直空白。
+        from app.services.wechat_gugatool_chatrooms import sync_wechat_gugatool_chatroom_from_message
+
+        sync_wechat_gugatool_chatroom_from_message(db, channel, normalized, conversation=conversation)
+
     if channel.channel_type == "wechat_ipad":
         from app.services.wechat_ipad.chatrooms import sync_wechat_ipad_chatroom_from_message
         from app.services.wechat_ipad.service import should_sync_wechat_ipad_chatroom_for_event, sync_wechat_ipad_chatrooms
@@ -223,10 +230,14 @@ def ingest_normalized_event(
             conversation=conversation,
         )
     elif channel.channel_type == "wechat_webridge":
-        # 微桥的群记录只由 groups_all 同步创建:未登记的群有人说话、入群事件、"邀请你加入群聊"都触发一次(去重防抖的)群同步。
+        # 群发现和成员目录属于基础同步,在群功能、插件及免打扰开关之前处理。
         from app.services.wechat_webridge.group_sync import observe_inbound_event
+        from app.services.wechat_webridge.member_directory import apply_event
+        from app.services.wechat_webridge.message_directory import observe_message
 
         observe_inbound_event(db, channel, normalized, conversation)
+        apply_event(db, channel, normalized, conversation)
+        observe_message(db, channel, normalized, conversation)
     elif channel.channel_type == "workwechat":
         from app.services.workwechat_chatrooms import sync_workwechat_chatroom_from_message
         from app.services.workwechat_contacts import apply_workwechat_contact_event
@@ -509,7 +520,7 @@ def _queue_inbound_media_fetch_if_needed(
     normalized: dict[str, Any],
     message: Message,
 ) -> None:
-    if channel.channel_type not in {"wechat_ipad", "wechat_webridge"}:
+    if channel.channel_type not in {"wechat_ipad", "wechat_webridge", "wechat_gugatool"}:
         return
     attachment_type = str(message.message_type or "").strip()
     if attachment_type not in {"image", "voice", "video"}:
@@ -527,7 +538,7 @@ def _queue_inbound_media_fetch_if_needed(
         "video": "video_info",
     }.get(attachment_type, "")
     media_info = details.get(metadata_key)
-    if channel.channel_type == "wechat_webridge":
+    if channel.channel_type in {"wechat_webridge", "wechat_gugatool"}:
         media_info = details.get("media") or {}
     if not isinstance(media_info, dict):
         return
@@ -594,6 +605,9 @@ def _update_chatroom_member_last_active(
     conversation: Conversation,
     normalized: dict[str, Any],
 ) -> None:
+    # 微桥由消息目录入口维护活跃时间和成员状态,统一处理媒体、系统事件及乱序保护。
+    if channel.channel_type == "wechat_webridge":
+        return
     conversation_payload = normalized.get("conversation") or {}
     if str(conversation_payload.get("chat_type") or "").strip() != "group":
         return

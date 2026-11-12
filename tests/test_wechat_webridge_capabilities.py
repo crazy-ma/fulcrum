@@ -143,6 +143,13 @@ class _FakeDirectoryDB:
     def flush(self) -> None:
         return None
 
+    def begin_nested(self):
+        """建群走"SAVEPOINT 内插入、撞唯一键就回读"的统一入口,替身只需要一个什么都不做的上下文管理器。"""
+
+        from contextlib import nullcontext
+
+        return nullcontext()
+
 
 def test_persist_directory_result_reads_group_id_and_nick_name() -> None:
     """groups_all 的群 ID 在 account_id、群名在 nick_name，不能因字段名不同而整条丢弃。"""
@@ -303,9 +310,9 @@ def test_claim_commands_plain_outbound_carries_command_name_and_args(tmp_path) -
     # 维护会入队 device_status / account_status / 群列表对账，裸会话没有租户补全；这里只验证领取逻辑，故桩掉。
     from unittest.mock import patch
 
-    from app.services.wechat_webridge import group_sync
+    from app.services.wechat_webridge import group_sync, member_directory
 
-    with patch.object(service, "_enqueue_device_status"), patch.object(service, "_enqueue_account_status"), patch.object(group_sync, "reconcile_if_due"):
+    with patch.object(service, "_enqueue_device_status"), patch.object(service, "_enqueue_account_status"), patch.object(group_sync, "reconcile_if_due"), patch.object(member_directory, "retry_due"):
         commands = service.claim_commands(db, channel, identity)
 
     assert len(commands) == 1
